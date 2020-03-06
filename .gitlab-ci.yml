@@ -2,6 +2,7 @@ include: 'https://gitlab-templates.ddbuild.io/slack-notifier/v1/template.yml'
 
 stages:
   - image_build
+  - image_publish
 
 variables:
   # The SRC_PATH is in the GOPATH of the builders which
@@ -76,3 +77,30 @@ build_agent7_windows:
     - Invoke-WebRequest -OutFile ${BUILD_CONTEXT}/datadog-agent-7-latest.amd64.zip https://s3.amazonaws.com/dd-agent-mstesting/builds/tagged/datadog-agent-7.18.0-rc.6.git.40.c6e5675-1-x86_64.zip
     - powershell -Command "docker build ${BUILD_ARG} --pull --file ${BUILD_CONTEXT}/windows/amd64/Dockerfile --tag ${TARGET_TAG} ${BUILD_CONTEXT}"
     - docker push ${TARGET_TAG}
+
+    # - export SRC_TAG=v$CI_PIPELINE_ID-${CI_COMMIT_SHA:0:7}
+    # - DOCKER_REGISTRY_LOGIN=$(aws ssm get-parameter --region us-east-1 --name ci.datadog-agent.$DOCKER_REGISTRY_LOGIN_SSM_KEY --with-decryption --query "Parameter.Value" --out text)
+    # - aws ssm get-parameter --region us-east-1 --name ci.datadog-agent.$DOCKER_REGISTRY_PWD_SSM_KEY --with-decryption --query "Parameter.Value" --out text | docker login --username "$DOCKER_REGISTRY_LOGIN" --password-stdin "$DOCKER_REGISTRY_URL"
+    # - pip install -r requirements.txt
+    # - if [[ -z "$DELEGATION_PASS_SSM_KEY" ]]; then echo "No signing key set"; exit 0; fi
+    # - echo "Importing delegation signing key"
+    # - export DOCKER_CONTENT_TRUST_REPOSITORY_PASSPHRASE=$(aws ssm get-parameter --region us-east-1 --name ci.datadog-agent.$DELEGATION_PASS_SSM_KEY --with-decryption --query "Parameter.Value" --out text)
+    # - export NOTARY_AUTH=$(echo "$DOCKER_REGISTRY_LOGIN:$(aws ssm get-parameter --region us-east-1 --name ci.datadog-agent.$DOCKER_REGISTRY_PWD_SSM_KEY --with-decryption --query "Parameter.Value" --out text)" | base64)
+    # - export NOTARY_DELEGATION_PASSPHRASE="$DOCKER_CONTENT_TRUST_REPOSITORY_PASSPHRASE"
+    # - aws ssm get-parameter --region us-east-1 --name ci.datadog-agent.$DELEGATION_KEY_SSM_KEY --with-decryption --query "Parameter.Value" --out text > /tmp/docker.key
+    # - notary -d ~/.docker/trust key import /tmp/docker.key; rm /tmp/docker.key
+
+publish_agent7_windows:
+  stage: image_publish
+  tags: ["runner:windows-docker", "windowsversion:1809"]
+  script:
+    - $ErrorActionPreference = "Stop"
+    - Set-PSDebug -trace 2
+    - $SHORT_CI_COMMIT_SHA = ${CI_COMMIT_SHA}.Substring(0,7)
+    - $TARGET_TAG = "${IMAGE}:v${CI_PIPELINE_ID}-${SHORT_CI_COMMIT_SHA}${TAG_SUFFIX}-win1809-amd64"
+    # Publish
+    - $DOCKER_REGISTRY_LOGIN = aws ssm get-parameter --region us-east-1 --name ci.datadog-agent.${DOCKER_REGISTRY_LOGIN_SSM_KEY} --with-decryption --query "Parameter.Value" --out text
+    - aws ssm get-parameter --region us-east-1 --name ci.datadog-agent.${DOCKER_REGISTRY_PWD_SSM_KEY} --with-decryption --query "Parameter.Value" --out text | docker login --username "${DOCKER_REGISTRY_LOGIN}" --password-stdin "${DOCKER_REGISTRY_URL}"
+    - docker tag ${TARGET_TAG} datadog/agent-dev:${CI_COMMIT_REF_SLUG}-py3-1809
+    - docker push datadog/agent-dev:${CI_COMMIT_REF_SLUG}-py3-1809
+    - notary --help
